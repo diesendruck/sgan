@@ -25,9 +25,10 @@ def conv_out_size_same(size, stride):
 
 
 class SGAN(object):
-  def __init__(self, sess, input_dim=2, output_dim=2, batch_size=64,
-          sample_num=64, z_dim=1, dataset_name="default", checkpoint_dir=None,
-          sample_dir=None, log_dir=None, expt_name=None):
+  def __init__(self, sess, input_dim=2, output_dim=2, batch_size=50,
+          sample_num=50, z_dim=1, dataset_name="default", d_spec="8,4,2",
+          g_spec="2,4,8", checkpoint_dir=None, sample_dir=None, log_dir=None,
+          expt_name=None):
     """
     Args:
       sess: TensorFlow session
@@ -41,6 +42,8 @@ class SGAN(object):
     self.sample_num = sample_num
     self.z_dim = z_dim
     self.dataset_name = dataset_name
+    self.d_spec = d_spec
+    self.g_spec = g_spec
     self.checkpoint_dir = checkpoint_dir
     self.sample_dir = sample_dir
     self.log_dir = log_dir
@@ -51,6 +54,7 @@ class SGAN(object):
     self.d_bn1 = batch_norm(name="discriminator_bn1")
     self.d_bn2 = batch_norm(name="discriminator_bn2")
     self.d_bn3 = batch_norm(name="discriminator_bn3")
+    self.d_bn_last = batch_norm(name="discriminator_bn_last")
     self.g_bn0 = batch_norm(name="generator_bn0")
     self.g_bn1 = batch_norm(name="generator_bn1")
     self.g_bn2 = batch_norm(name="generator_bn2")
@@ -114,6 +118,8 @@ class SGAN(object):
     self.d_loss_gen = tf.reduce_mean(
       sigmoid_cross_entropy_with_logits(self.D_logits_, tf.zeros_like(self.D_)))
 
+    # TODO: Test d on its own, by defining d_loss as only related to real data.
+    # Then check heatmaps to see if high prob areas are over true data.
     self.d_loss = self.d_loss_real + self.d_loss_gen
     self.d_loss_heldout = self.d_loss_real_heldout + self.d_loss_gen
 
@@ -170,7 +176,7 @@ class SGAN(object):
     except:
       tf.initialize_all_variables().run()
 
-    # Commented to avoid error of not having 4-D tensor.
+    # Removed self.G_sum to avoid error of not having 4-D tensor.
     #self.g_sum = merge_summary([self.z_sum, self.d__sum, self.G_sum,
     #    self.d_loss_gen_sum, self.g_loss_sum])
     self.g_sum = merge_summary([self.z_sum, self.d__sum,
@@ -180,7 +186,10 @@ class SGAN(object):
     self.writer = SummaryWriter(self.log_dir, self.sess.graph)
 
     # Generate z.
-    sample_z = np.random.uniform(-1, 1, size=(self.sample_num , self.z_dim))
+    if config.z_distr== "Uniform":
+      sample_z = np.random.uniform(-1, 1, size=(self.sample_num , self.z_dim))
+    else:
+      sample_z = np.random.normal(0, 1, size=(self.sample_num, self.z_dim))
     print("Made random z, size: {}".format(sample_z.shape))
 
     # Generate grid for evaluating discriminator loss.
@@ -204,17 +213,21 @@ class SGAN(object):
       for idx in xrange(batch_idxs):
         batch_inputs = training[idx*config.batch_size:(idx+1)*config.batch_size]
 
-        batch_z = np.random.uniform(-1, 1, [config.batch_size, self.z_dim]) \
-              .astype(np.float32)
+        if config.z_distr== "Uniform":
+          batch_z = np.random.uniform(-1, 1, [config.batch_size, self.z_dim]) \
+                .astype(np.float32)
+        else:
+          batch_z = np.random.normal(0, 1, [config.batch_size, self.z_dim])
 
         # Update D network
-        _, summary_str = self.sess.run([d_optim, self.d_sum],
-          feed_dict={self.inputs: batch_inputs, self.z: batch_z,
-              self.heldout_inputs: heldout})
-        self.writer.add_summary(summary_str, counter)
+        for _ in range(config.d_per_iter):
+            _, summary_str = self.sess.run([d_optim, self.d_sum],
+              feed_dict={self.inputs: batch_inputs, self.z: batch_z,
+                  self.heldout_inputs: heldout})
+            self.writer.add_summary(summary_str, counter)
 
-        # Update G network, twice.
-        for _ in range(2):
+        # Update G network.
+        for _ in range(config.g_per_iter):
             _, summary_str = self.sess.run([g_optim, self.g_sum],
               feed_dict={self.z: batch_z})
             self.writer.add_summary(summary_str, counter)
@@ -227,79 +240,87 @@ class SGAN(object):
         errG = self.g_loss.eval({self.z: batch_z})
 
         counter += 1
-        if np.mod(epoch, 10) == 0:
-          print("Epoch: [%2d] [%4d/%4d] time: %.1f, d_loss(gen, insample, heldout): (%.2f, %.2f, %.2f), g_loss: %.2f" \
+        print("Epoch: [%2d] [%4d/%4d] time: %.1f, d_loss(gen, insample, heldout): (%.2f, %.2f, %.2f), g_loss: %.2f" \
           % (epoch, idx, batch_idxs, time.time() - start_time, errD_gen,
              errD_real, errD_real_heldout, errG))
 
-      try:
-        # Run sampler and losses.
-        samples, d_loss, g_loss = self.sess.run(
-          [self.sampler, self.d_loss, self.g_loss],
-          feed_dict={
-              self.z: sample_z,
-              self.inputs: in_sample,
-          },
-        )
-
-        # Run evaluation of discriminator on grid.
-        d_grid = self.sess.run(
-          [self.d_grid],
-          feed_dict={
-              self.grid: grid,
-          },
-        )
-
         # Make plots from certain epochs.
         if np.mod(epoch, 10) == 0:
-          # Plot generated samples against true training data.
-          fig, ax = plt.subplots()
-          ax.scatter([x[0] for x in training], [x[1] for x in training],
-                  c="cornflowerblue")
-          ax.scatter([x[0] for x in samples], [x[1] for x in samples],
-                  c="r")
-          fig.savefig("sgan{}.png".format(epoch))
-          plt.close(fig)
-          
-          # Plot heatmap of discriminator on grid.
-          fig, ax = plt.subplots()
-          d_grid = np.reshape(d_grid[0][0], [nx, ny])
-          im = ax.pcolormesh(x_grid, y_grid, d_grid)
-          fig.colorbar(im)
-          fig.savefig("sgan{}_heatmap.png".format(epoch))
-          plt.close(fig)
+          try:
+            # Run sampler and losses.
+            samples, d_loss, g_loss = self.sess.run(
+              [self.sampler, self.d_loss, self.g_loss],
+              feed_dict={
+                  self.z: sample_z,
+                  self.inputs: in_sample,
+              },
+            )
 
-        # TODO: Make a save function that plots true data and samples.
-        print("[Sample] d_loss: %.8f, g_loss: %.8f" % (d_loss, g_loss)) 
+            # Run evaluation of discriminator on grid.
+            d_grid = self.sess.run(
+              [self.d_grid],
+              feed_dict={
+                  self.grid: grid,
+              },
+            )
 
-      except:
-        print("one pic error!...")
+            # Plot heatmap of discriminator on grid.
+            fig, ax = plt.subplots()
+            d_grid = np.reshape(d_grid[0][0], [nx, ny])
+            im = ax.pcolormesh(x_grid, y_grid, d_grid)
+            fig.colorbar(im)
 
+            # Plot generated samples against true training data.
+            ax.scatter([x[0] for x in training], [x[1] for x in training],
+                    c="cornflowerblue", alpha=0.1, marker="+")
+            ax.scatter([x[0] for x in samples], [x[1] for x in samples],
+                    c="r", alpha=0.1)
+            fig.savefig("sgan{}.png".format(epoch))
+            plt.close(fig)
+            
+          #print("[Sample] d_loss: %.8f, g_loss: %.8f" % (d_loss, g_loss)) 
 
-      # Save checkpoint for certain epochs.
-      if np.mod(epoch, 50) == 0:
-        self.save(self.checkpoint_dir, counter)
+          except:
+            print("one pic error!...")
+
+        # Save checkpoint for certain epochs.
+        if np.mod(epoch, 100) == 0:
+          self.save(self.checkpoint_dir, counter)
 
     # Email results from all runs.
     outputs = natural_sort(glob("./sgan*.png")) 
     attachments = " "
     for o in outputs:
         attachments += " -a {}".format(o)
-    os.system(('echo $PWD | mutt -s "figs of sgan: dataset_{}, g_lr_{},'+
-        'd_lr_{}" momod@utexas.edu {}').format(config.dataset,
-            config.g_learning_rate, config.d_learning_rate, attachments))
-
+    
+    os.system(('echo $PWD | mutt -s "sgan: {}" momod@utexas.edu {}').format(
+        self.get_config_summary(config), attachments))
 
   def discriminator(self, candidates, reuse=False):
     with tf.variable_scope("discriminator") as scope:
       if reuse:
         scope.reuse_variables()
       
-      h0 = self.d_bn0(tf.layers.dense(inputs=candidates, units=8, activation=tf.nn.relu))
-      h1 = self.d_bn1(tf.layers.dense(inputs=h0, units=4, activation=tf.nn.relu))
-      h2 = self.d_bn2(tf.layers.dense(inputs=h1, units=2, activation=tf.nn.relu))
-      h3 = self.d_bn3(tf.layers.dense(inputs=h2, units=1, activation=tf.nn.relu))
-      return tf.nn.sigmoid(h3), h3
+      spec = self.d_spec
+      hidden_dims = [d.strip() for d in spec.split(",")]
+      assert len(hidden_dims) > 0, "Spec for architecture not properly defined, e.g. '8,4,2'."
+      assert all([d.isdigit() for d in hidden_dims]), "Dims split on ',' and must be ints. Incorrect d_spec: '{}'".format(spec)
+
+      # Define batch norm objects.
+      bn_objects = []
+      for i, dim in enumerate(hidden_dims):
+        bn_objects.append(batch_norm(name="discriminator_bn{}".format(i)))
+
+      # Define graph according to spec.
+      current_layer = candidates
+      for i, dim in enumerate(hidden_dims):
+        bn = bn_objects[i]
+        next_layer = bn(tf.layers.dense(inputs=current_layer, units=dim,
+            activation=tf.nn.relu))
+        current_layer = next_layer
+      h_last = self.d_bn_last(tf.layers.dense(inputs=current_layer, units=1,
+          activation=tf.nn.relu))
+      return tf.nn.sigmoid(h_last), h_last
 
 
   def generator(self, z):
@@ -329,9 +350,28 @@ class SGAN(object):
       #return h3
 
 
+  def get_config_summary(self, config):
+    summary_items = [
+      ["dataset", config.dataset],
+      ["d_learning_rate", config.d_learning_rate],
+      ["g_learning_rate", config.g_learning_rate],
+      ["d_spec", config.d_spec],
+      ["g_spec", config.g_spec],
+      ["epoch", config.epoch],
+      ["batch_size", config.batch_size],
+      ["z_dim", config.z_dim],
+      ["z_distr", config.z_distr],
+      ["expt_name", config.expt_name],
+    ]
+    summary_string = ""
+    for item in summary_items:
+      summary_string += "{}: {}, ".format(item[0], item[1])
+    return summary_string
+
+
   def load_gaussian(self):
     """Sample from a Gaussian."""
-    n = 1000
+    n = 500
     variance = 0.01
 
     points = np.random.multivariate_normal([0, 0],
