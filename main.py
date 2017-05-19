@@ -1,7 +1,8 @@
+import logging
+import numpy as np
 import os
 import sys
 import scipy.misc
-import numpy as np
 
 from model import SGAN
 from utils import pp, visualize, to_json, show_all_variables
@@ -43,6 +44,9 @@ def main(_):
   if not os.path.exists(FLAGS.log_dir):
     os.makedirs(FLAGS.log_dir)
 
+  logging.basicConfig(filename="{}/run_main.log".format(FLAGS.log_dir),
+          filemode="w", level=logging.INFO)    
+  logging.info("Started")
   #gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.333)
   run_config = tf.ConfigProto()
   run_config.gpu_options.allow_growth=True
@@ -74,6 +78,9 @@ def main(_):
     # Below is codes for visualization
     OPTION = 1
     #visualize(sess, sgan, FLAGS, OPTION)
+
+
+  logging.info("Finished")
 
 if __name__ == '__main__':
   tf.app.run()

@@ -1,4 +1,5 @@
 from __future__ import division
+import logging
 import math
 import matplotlib
 matplotlib.use('Agg')
@@ -59,6 +60,7 @@ class SGAN(object):
     self.g_bn1 = batch_norm(name="generator_bn1")
     self.g_bn2 = batch_norm(name="generator_bn2")
     self.g_bn3 = batch_norm(name="generator_bn3")
+    self.g_bn_last = batch_norm(name="generator_bn_last")
 
     self.build_model()
 
@@ -87,7 +89,10 @@ class SGAN(object):
     self.G = self.generator(self.z)
     self.D, self.D_logits = self.discriminator(inputs)
 
-    self.sampler = self.sampler(self.z)  # Samples that appear in /samples.
+    self.sampler_unit = self.sampler(self.z, flag="unit")  # Samples that appear in /samples.
+    self.sampler_man = self.sampler(self.z, flag="man")
+    self.sampler_tanh = self.sampler(self.z, flag="tanh")
+    self.sampler_none = self.sampler(self.z, flag="none")
     self.d_grid = self.discriminator(self.grid, reuse=True)  # Eval d_loss on grid.
 
     self.D_, self.D_logits_ = self.discriminator(self.G, reuse=True)
@@ -114,11 +119,10 @@ class SGAN(object):
     self.d_loss_real_heldout = tf.reduce_mean(
       sigmoid_cross_entropy_with_logits(self.D_logits_heldout, tf.ones_like(self.D_heldout)))
     self.d_loss_real = tf.reduce_mean(
-      sigmoid_cross_entropy_with_logits(self.D_logits, tf.ones_like(self.D)))
+        sigmoid_cross_entropy_with_logits(self.D_logits, tf.ones_like(self.D)))
     self.d_loss_gen = tf.reduce_mean(
       sigmoid_cross_entropy_with_logits(self.D_logits_, tf.zeros_like(self.D_)))
 
-    # TODO: Test d on its own, by defining d_loss as only related to real data.
     # Then check heatmaps to see if high prob areas are over true data.
     self.d_loss = self.d_loss_real + self.d_loss_gen
     self.d_loss_heldout = self.d_loss_real_heldout + self.d_loss_gen
@@ -159,7 +163,7 @@ class SGAN(object):
     elif config.dataset == "SwissRoll":
       pass
     else:
-      raise ValueError("Choose dataset in ['ConcentricCircles', 'SwissRoll'].")
+      raise ValueError("Choose dataset in ['Gaussian', 'ConcentricCircles'].")
 
 
     # Split full data into training and heldout sets.
@@ -190,7 +194,7 @@ class SGAN(object):
       sample_z = np.random.uniform(-1, 1, size=(self.sample_num , self.z_dim))
     else:
       sample_z = np.random.normal(0, 1, size=(self.sample_num, self.z_dim))
-    print("Made random z, size: {}".format(sample_z.shape))
+    logging.info("Made random z, size: {}".format(sample_z.shape))
 
     # Generate grid for evaluating discriminator loss.
     nx, ny = (20, 20)
@@ -219,19 +223,95 @@ class SGAN(object):
         else:
           batch_z = np.random.normal(0, 1, [config.batch_size, self.z_dim])
 
+        """
+        # BEFORE D
+        samples_unit, samples_man, samples_tanh, samples_none1, d_loss, g_loss = self.sess.run(
+          [self.sampler_unit, self.sampler_man, self.sampler_tanh, self.sampler_none,
+           self.d_loss, self.g_loss],
+          feed_dict={
+              self.z: sample_z,
+              self.inputs: in_sample,
+          },
+        )
+        d_grid = self.sess.run(
+          [self.d_grid],
+          feed_dict={
+              self.grid: grid,
+          },
+        )
+        plot_and_save_heatmap(d_grid, nx, ny, x_grid, y_grid, batch_inputs,
+            samples_none1, epoch, idx, "beforeD")
+
+        samples_unit, samples_man, samples_tanh, samples_none2, d_loss, g_loss = self.sess.run(
+          [self.sampler_unit, self.sampler_man, self.sampler_tanh, self.sampler_none,
+           self.d_loss, self.g_loss],
+          feed_dict={
+              self.z: sample_z,
+              self.inputs: in_sample,
+          },
+        )
+        d_grid = self.sess.run(
+          [self.d_grid],
+          feed_dict={
+              self.grid: grid,
+          },
+        )
+        plot_and_save_heatmap(d_grid, nx, ny, x_grid, y_grid, batch_inputs,
+            samples_none2, epoch, idx, "beforeD1")
+
+        """
         # Update D network
         for _ in range(config.d_per_iter):
             _, summary_str = self.sess.run([d_optim, self.d_sum],
               feed_dict={self.inputs: batch_inputs, self.z: batch_z,
                   self.heldout_inputs: heldout})
             self.writer.add_summary(summary_str, counter)
+        """
+        #AFTER D
+        samples_unit, samples_man, samples_tanh, samples_none, d_loss, g_loss = self.sess.run(
+          [self.sampler_unit, self.sampler_man, self.sampler_tanh, self.sampler_none,
+           self.d_loss, self.g_loss],
+          feed_dict={
+              self.z: sample_z,
+              self.inputs: in_sample,
+          },
+        )
+        d_grid = self.sess.run(
+          [self.d_grid],
+          feed_dict={
+              self.grid: grid,
+          },
+        )
+        plot_and_save_heatmap(d_grid, nx, ny, x_grid, y_grid, batch_inputs,
+            samples_none, epoch, idx, "afterD")
+        """
 
         # Update G network.
         for _ in range(config.g_per_iter):
             _, summary_str = self.sess.run([g_optim, self.g_sum],
               feed_dict={self.z: batch_z})
             self.writer.add_summary(summary_str, counter)
-          
+
+        """
+        samples_unit, samples_man, samples_tanh, samples_none, d_loss, g_loss = self.sess.run(
+          [self.sampler_unit, self.sampler_man, self.sampler_tanh, self.sampler_none,
+           self.d_loss, self.g_loss],
+          feed_dict={
+              self.z: sample_z,
+              self.inputs: in_sample,
+          },
+        )
+        d_grid = self.sess.run(
+          [self.d_grid],
+          feed_dict={
+              self.grid: grid,
+          },
+        )
+        plot_and_save_heatmap(d_grid, nx, ny, x_grid, y_grid, batch_inputs,
+            samples_none, epoch, idx, "afterG")
+
+        """
+
         errD_gen = self.d_loss_gen.eval({self.z: batch_z})
         errD_real = self.d_loss_real.eval({self.inputs: batch_inputs})
         errD_real_heldout = self.d_loss_real_heldout.eval(
@@ -245,11 +325,23 @@ class SGAN(object):
              errD_real, errD_real_heldout, errG))
 
         # Make plots from certain epochs.
-        if np.mod(epoch, 10) == 0:
+        if np.mod(epoch, 1) == 0 and idx == 0:
           try:
             # Run sampler and losses.
+            """
             samples, d_loss, g_loss = self.sess.run(
               [self.sampler, self.d_loss, self.g_loss],
+              feed_dict={
+                  self.z: sample_z,
+                  self.inputs: in_sample,
+              },
+            )
+            """
+
+            # TODO: testing multiple samplers.
+            samples_unit, samples_man, samples_tanh, samples_none, d_loss, g_loss = self.sess.run(
+              [self.sampler_unit, self.sampler_man, self.sampler_tanh, self.sampler_none,
+               self.d_loss, self.g_loss],
               feed_dict={
                   self.z: sample_z,
                   self.inputs: in_sample,
@@ -264,20 +356,9 @@ class SGAN(object):
               },
             )
 
-            # Plot heatmap of discriminator on grid.
-            fig, ax = plt.subplots()
-            d_grid = np.reshape(d_grid[0][0], [nx, ny])
-            im = ax.pcolormesh(x_grid, y_grid, d_grid)
-            fig.colorbar(im)
+            plot_and_save_heatmap(d_grid, nx, ny, x_grid, y_grid, batch_inputs,
+                samples_none, epoch, idx, "true")
 
-            # Plot generated samples against true training data.
-            ax.scatter([x[0] for x in training], [x[1] for x in training],
-                    c="cornflowerblue", alpha=0.1, marker="+")
-            ax.scatter([x[0] for x in samples], [x[1] for x in samples],
-                    c="r", alpha=0.1)
-            fig.savefig("sgan{}.png".format(epoch))
-            plt.close(fig)
-            
           #print("[Sample] d_loss: %.8f, g_loss: %.8f" % (d_loss, g_loss)) 
 
           except:
@@ -294,7 +375,7 @@ class SGAN(object):
         attachments += " -a {}".format(o)
     
     os.system(('echo $PWD | mutt -s "sgan: {}" momod@utexas.edu {}').format(
-        self.get_config_summary(config), attachments))
+        get_config_summary(config), attachments))
 
   def discriminator(self, candidates, reuse=False):
     with tf.variable_scope("discriminator") as scope:
@@ -323,58 +404,57 @@ class SGAN(object):
       return tf.nn.sigmoid(h_last), h_last
 
 
+  # TODO: Testing new generator output.
   def generator(self, z):
     with tf.variable_scope("generator") as scope:
-      h0 = self.g_bn0(tf.layers.dense(inputs=z, units=2, activation=tf.nn.relu))
+      h0 = self.g_bn0(tf.layers.dense(inputs=z, units=4, activation=tf.nn.relu))
       h1 = self.g_bn1(tf.layers.dense(inputs=h0, units=4, activation=tf.nn.relu))
-      h2 = self.g_bn2(tf.layers.dense(inputs=h1, units=8, activation=tf.nn.relu))
+      h2 = self.g_bn2(tf.layers.dense(inputs=h1, units=4, activation=tf.nn.relu))
       h3 = self.g_bn3(tf.layers.dense(inputs=h2, units=2, activation=tf.nn.relu))
-      return tf.nn.tanh(h3)
+      return h3
+      #h4 = tf.contrib.layers.unit_norm(inputs=h3, dim=0)
+      #return h4
+      #return tf.nn.tanh(h3)
       #return tf.nn.sigmoid()
       #return h3
 
 
-  def sampler(self, z):
+  # TODO: Test output of generator, to see if it needs normalizing.
+  def sampler(self, z, flag):
     with tf.variable_scope("generator") as scope:
       scope.reuse_variables()
 
-      h0 = self.g_bn0(tf.layers.dense(inputs=z, units=2, activation=tf.nn.relu),
+      h0 = self.g_bn0(tf.layers.dense(inputs=z, units=4, activation=tf.nn.relu),
               train=False)
       h1 = self.g_bn1(tf.layers.dense(inputs=h0, units=4, activation=tf.nn.relu),
               train=False)
-      h2 = self.g_bn2(tf.layers.dense(inputs=h1, units=8, activation=tf.nn.relu),
+      h2 = self.g_bn2(tf.layers.dense(inputs=h1, units=4, activation=tf.nn.relu),
               train=False)
       h3 = self.g_bn3(tf.layers.dense(inputs=h2, units=2, activation=tf.nn.relu),
               train=False)
-      return tf.nn.tanh(h3)
-      #return h3
-
-
-  def get_config_summary(self, config):
-    summary_items = [
-      ["dataset", config.dataset],
-      ["d_learning_rate", config.d_learning_rate],
-      ["g_learning_rate", config.g_learning_rate],
-      ["d_spec", config.d_spec],
-      ["g_spec", config.g_spec],
-      ["epoch", config.epoch],
-      ["batch_size", config.batch_size],
-      ["z_dim", config.z_dim],
-      ["z_distr", config.z_distr],
-      ["expt_name", config.expt_name],
-    ]
-    summary_string = ""
-    for item in summary_items:
-      summary_string += "{}: {}, ".format(item[0], item[1])
-    return summary_string
+      if flag == "unit":
+        h4 = tf.contrib.layers.unit_norm(inputs=h3, dim=0)
+        return h4
+      elif flag == "man":
+        norm = tf.sqrt(tf.reduce_sum(tf.square(h3), 0, keep_dims=True))
+        normalized = h3 / norm
+        return normalized
+      elif flag == "none":
+        return h3
+      elif flag == "tanh":
+        return tf.nn.tanh(h3)
+      else:
+        sys.exit("WRONG norm flag")
+      #return tf.nn.tanh(h3)
 
 
   def load_gaussian(self):
     """Sample from a Gaussian."""
     n = 500
+    center = [0.3, 0.3]
     variance = 0.01
 
-    points = np.random.multivariate_normal([0, 0],
+    points = np.random.multivariate_normal(center,
             [[variance, 0], [0, variance]], n)
 
     points = np.asarray(points)
@@ -384,6 +464,7 @@ class SGAN(object):
   def load_concentric_circles(self):
     """Sample from two concentric circles."""
     n = 500
+    center = [0,0]
     r1 = 0.2
     r2 = 0.7
 
@@ -392,8 +473,8 @@ class SGAN(object):
       sample = []
       for _ in xrange(n):
         angle = 2 * math.pi * random.random()
-        x = r * math.cos(angle)
-        y = r * math.sin(angle)
+        x = r * math.cos(angle) + center[0]
+        y = r * math.sin(angle) + center[1]
         sample.append([x,y])
       return sample
 

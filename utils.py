@@ -4,8 +4,12 @@ Some codes from https://github.com/Newmu/dcgan_code
 from __future__ import division
 import json
 import math
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 import numpy as np
 import os
+import pdb
 import pprint
 import random
 import re
@@ -249,6 +253,46 @@ def visualize(sess, dcgan, config, option):
     make_gif(new_image_set, './samples/test_gif_merged.gif', duration=8)
 
 def natural_sort(l): 
-    convert = lambda text: int(text) if text.isdigit() else text.lower() 
-    alphanum_key = lambda key: [ convert(c) for c in re.split('([0-9]+)', key) ] 
-    return sorted(l, key = alphanum_key)
+  convert = lambda text: int(text) if text.isdigit() else text.lower() 
+  alphanum_key = lambda key: [ convert(c) for c in re.split('([0-9]+)', key) ] 
+  return sorted(l, key = alphanum_key)
+
+def get_config_summary(config):
+  summary_items = [
+    ["dataset", config.dataset],
+    ["d_learning_rate", config.d_learning_rate],
+    ["g_learning_rate", config.g_learning_rate],
+    ["d_per_iter", config.d_per_iter],
+    ["g_per_iter", config.g_per_iter],
+    ["d_spec", config.d_spec],
+    ["g_spec", config.g_spec],
+    ["epoch", config.epoch],
+    ["batch_size", config.batch_size],
+    ["z_dim", config.z_dim],
+    ["z_distr", config.z_distr],
+    ["expt_name", config.expt_name],
+  ]
+  summary_string = ""
+  for item in summary_items:
+    summary_string += "{}: {}, ".format(item[0], item[1])
+  return summary_string
+
+
+def plot_and_save_heatmap(d_grid, nx, ny, x_grid, y_grid, training, samples,
+    epoch, idx, file_prefix):
+  # Plot heatmap of discriminator on grid.
+  fig, ax = plt.subplots()
+  d_grid = np.reshape(d_grid[0][0], [nx, ny])
+  im = ax.pcolormesh(x_grid, y_grid, d_grid)
+  fig.colorbar(im)
+
+  # Plot generated samples against true training data.
+  ax.scatter([x[0] for x in training], [x[1] for x in training],
+          c="cornflowerblue", alpha=0.3, marker="+")
+  ax.scatter([x[0] for x in samples], [x[1] for x in samples],
+          c="r", alpha=0.3)
+  ax.set_title("Epoch {}, Idx {}".format(epoch, idx))
+  ax.set_xlim([-1,1])
+  ax.set_ylim([-1,1])
+  fig.savefig("sgan_ep_{}_id_{}_{}.png".format(epoch, idx, file_prefix))
+  plt.close(fig)
