@@ -223,94 +223,18 @@ class SGAN(object):
         else:
           batch_z = np.random.normal(0, 1, [config.batch_size, self.z_dim])
 
-        """
-        # BEFORE D
-        samples_unit, samples_man, samples_tanh, samples_none1, d_loss, g_loss = self.sess.run(
-          [self.sampler_unit, self.sampler_man, self.sampler_tanh, self.sampler_none,
-           self.d_loss, self.g_loss],
-          feed_dict={
-              self.z: sample_z,
-              self.inputs: in_sample,
-          },
-        )
-        d_grid = self.sess.run(
-          [self.d_grid],
-          feed_dict={
-              self.grid: grid,
-          },
-        )
-        plot_and_save_heatmap(d_grid, nx, ny, x_grid, y_grid, batch_inputs,
-            samples_none1, epoch, idx, "beforeD")
-
-        samples_unit, samples_man, samples_tanh, samples_none2, d_loss, g_loss = self.sess.run(
-          [self.sampler_unit, self.sampler_man, self.sampler_tanh, self.sampler_none,
-           self.d_loss, self.g_loss],
-          feed_dict={
-              self.z: sample_z,
-              self.inputs: in_sample,
-          },
-        )
-        d_grid = self.sess.run(
-          [self.d_grid],
-          feed_dict={
-              self.grid: grid,
-          },
-        )
-        plot_and_save_heatmap(d_grid, nx, ny, x_grid, y_grid, batch_inputs,
-            samples_none2, epoch, idx, "beforeD1")
-
-        """
         # Update D network
         for _ in range(config.d_per_iter):
             _, summary_str = self.sess.run([d_optim, self.d_sum],
               feed_dict={self.inputs: batch_inputs, self.z: batch_z,
                   self.heldout_inputs: heldout})
             self.writer.add_summary(summary_str, counter)
-        """
-        #AFTER D
-        samples_unit, samples_man, samples_tanh, samples_none, d_loss, g_loss = self.sess.run(
-          [self.sampler_unit, self.sampler_man, self.sampler_tanh, self.sampler_none,
-           self.d_loss, self.g_loss],
-          feed_dict={
-              self.z: sample_z,
-              self.inputs: in_sample,
-          },
-        )
-        d_grid = self.sess.run(
-          [self.d_grid],
-          feed_dict={
-              self.grid: grid,
-          },
-        )
-        plot_and_save_heatmap(d_grid, nx, ny, x_grid, y_grid, batch_inputs,
-            samples_none, epoch, idx, "afterD")
-        """
 
         # Update G network.
         for _ in range(config.g_per_iter):
             _, summary_str = self.sess.run([g_optim, self.g_sum],
               feed_dict={self.z: batch_z})
             self.writer.add_summary(summary_str, counter)
-
-        """
-        samples_unit, samples_man, samples_tanh, samples_none, d_loss, g_loss = self.sess.run(
-          [self.sampler_unit, self.sampler_man, self.sampler_tanh, self.sampler_none,
-           self.d_loss, self.g_loss],
-          feed_dict={
-              self.z: sample_z,
-              self.inputs: in_sample,
-          },
-        )
-        d_grid = self.sess.run(
-          [self.d_grid],
-          feed_dict={
-              self.grid: grid,
-          },
-        )
-        plot_and_save_heatmap(d_grid, nx, ny, x_grid, y_grid, batch_inputs,
-            samples_none, epoch, idx, "afterG")
-
-        """
 
         errD_gen = self.d_loss_gen.eval({self.z: batch_z})
         errD_real = self.d_loss_real.eval({self.inputs: batch_inputs})
@@ -328,16 +252,6 @@ class SGAN(object):
         if np.mod(epoch, 1) == 0 and idx == 0:
           try:
             # Run sampler and losses.
-            """
-            samples, d_loss, g_loss = self.sess.run(
-              [self.sampler, self.d_loss, self.g_loss],
-              feed_dict={
-                  self.z: sample_z,
-                  self.inputs: in_sample,
-              },
-            )
-            """
-
             # TODO: testing multiple samplers.
             samples_unit, samples_man, samples_tanh, samples_none, d_loss, g_loss = self.sess.run(
               [self.sampler_unit, self.sampler_man, self.sampler_tanh, self.sampler_none,
