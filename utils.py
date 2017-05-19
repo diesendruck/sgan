@@ -279,7 +279,7 @@ def get_config_summary(config):
 
 
 def plot_and_save_heatmap(d_grid, nx, ny, x_grid, y_grid, training, samples,
-    epoch, idx, file_prefix):
+    epoch, idx, tag):
   # Plot heatmap of discriminator on grid.
   fig, ax = plt.subplots()
   d_grid = np.reshape(d_grid[0][0], [nx, ny])
@@ -294,5 +294,8 @@ def plot_and_save_heatmap(d_grid, nx, ny, x_grid, y_grid, training, samples,
   ax.set_title("Epoch {}, Idx {}".format(epoch, idx))
   ax.set_xlim([-1,1])
   ax.set_ylim([-1,1])
-  fig.savefig("sgan_ep_{}_id_{}_{}.png".format(epoch, idx, file_prefix))
+  if tag:
+    fig.savefig("sgan_ep_{}_id_{}_{}.png".format(epoch, idx, tag))
+  else:
+    fig.savefig("sgan_ep_{}_id_{}.png".format(epoch, idx))
   plt.close(fig)

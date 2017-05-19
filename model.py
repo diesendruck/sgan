@@ -90,7 +90,6 @@ class SGAN(object):
     self.D, self.D_logits = self.discriminator(inputs)
 
     self.sampler_unit = self.sampler(self.z, flag="unit")  # Samples that appear in /samples.
-    self.sampler_man = self.sampler(self.z, flag="man")
     self.sampler_tanh = self.sampler(self.z, flag="tanh")
     self.sampler_none = self.sampler(self.z, flag="none")
     self.d_grid = self.discriminator(self.grid, reuse=True)  # Eval d_loss on grid.
@@ -253,8 +252,8 @@ class SGAN(object):
           try:
             # Run sampler and losses.
             # TODO: testing multiple samplers.
-            samples_unit, samples_man, samples_tanh, samples_none, d_loss, g_loss = self.sess.run(
-              [self.sampler_unit, self.sampler_man, self.sampler_tanh, self.sampler_none,
+            samples_unit, samples_tanh, samples_none, d_loss, g_loss = self.sess.run(
+              [self.sampler_unit, self.sampler_tanh, self.sampler_none,
                self.d_loss, self.g_loss],
               feed_dict={
                   self.z: sample_z,
@@ -271,7 +270,7 @@ class SGAN(object):
             )
 
             plot_and_save_heatmap(d_grid, nx, ny, x_grid, y_grid, batch_inputs,
-                samples_none, epoch, idx, "true")
+                samples_none, epoch, idx, tag=None)
 
           #print("[Sample] d_loss: %.8f, g_loss: %.8f" % (d_loss, g_loss)) 
 
@@ -321,16 +320,26 @@ class SGAN(object):
   # TODO: Testing new generator output.
   def generator(self, z):
     with tf.variable_scope("generator") as scope:
-      h0 = self.g_bn0(tf.layers.dense(inputs=z, units=4, activation=tf.nn.relu))
-      h1 = self.g_bn1(tf.layers.dense(inputs=h0, units=4, activation=tf.nn.relu))
-      h2 = self.g_bn2(tf.layers.dense(inputs=h1, units=4, activation=tf.nn.relu))
-      h3 = self.g_bn3(tf.layers.dense(inputs=h2, units=2, activation=tf.nn.relu))
-      return h3
-      #h4 = tf.contrib.layers.unit_norm(inputs=h3, dim=0)
-      #return h4
-      #return tf.nn.tanh(h3)
-      #return tf.nn.sigmoid()
-      #return h3
+
+      spec = self.g_spec
+      hidden_dims = [d.strip() for d in spec.split(",")]
+      assert len(hidden_dims) > 0, "Spec for architecture not properly defined, e.g. '8,4,2'."
+      assert all([d.isdigit() for d in hidden_dims]), "Dims split on ',' and must be ints. Incorrect g_spec: '{}'".format(spec)
+      # Define batch norm objects.
+      bn_objects = []
+      for i, dim in enumerate(hidden_dims):
+        bn_objects.append(batch_norm(name="generator_bn{}".format(i)))
+
+      # Define graph according to spec.
+      current_layer = z
+      for i, dim in enumerate(hidden_dims):
+        bn = bn_objects[i]
+        next_layer = bn(tf.layers.dense(inputs=current_layer, units=dim,
+            activation=tf.nn.relu))
+        current_layer = next_layer
+      h_last = self.g_bn_last(tf.layers.dense(inputs=current_layer, units=2,
+          activation=tf.nn.relu))
+      return h_last
 
 
   # TODO: Test output of generator, to see if it needs normalizing.
@@ -338,28 +347,35 @@ class SGAN(object):
     with tf.variable_scope("generator") as scope:
       scope.reuse_variables()
 
-      h0 = self.g_bn0(tf.layers.dense(inputs=z, units=4, activation=tf.nn.relu),
-              train=False)
-      h1 = self.g_bn1(tf.layers.dense(inputs=h0, units=4, activation=tf.nn.relu),
-              train=False)
-      h2 = self.g_bn2(tf.layers.dense(inputs=h1, units=4, activation=tf.nn.relu),
-              train=False)
-      h3 = self.g_bn3(tf.layers.dense(inputs=h2, units=2, activation=tf.nn.relu),
-              train=False)
+      spec = self.g_spec
+      hidden_dims = [d.strip() for d in spec.split(",")]
+      assert len(hidden_dims) > 0, "Spec for architecture not properly defined, e.g. '8,4,2'."
+      assert all([d.isdigit() for d in hidden_dims]), "Dims split on ',' and must be ints. Incorrect g_spec: '{}'".format(spec)
+
+      # Define batch norm objects.
+      bn_objects = []
+      for i, dim in enumerate(hidden_dims):
+        bn_objects.append(batch_norm(name="generator_bn{}".format(i)))
+
+      # Define graph according to spec.
+      current_layer = z
+      for i, dim in enumerate(hidden_dims):
+        bn = bn_objects[i]
+        next_layer = bn(tf.layers.dense(inputs=current_layer, units=dim,
+            activation=tf.nn.relu), train=False)
+        current_layer = next_layer
+      h_last = self.g_bn_last(tf.layers.dense(inputs=current_layer, units=2,
+          activation=tf.nn.relu))
+
       if flag == "unit":
-        h4 = tf.contrib.layers.unit_norm(inputs=h3, dim=0)
-        return h4
-      elif flag == "man":
-        norm = tf.sqrt(tf.reduce_sum(tf.square(h3), 0, keep_dims=True))
-        normalized = h3 / norm
-        return normalized
+        h_last = tf.contrib.layers.unit_norm(inputs=h_last, dim=0)
+        return h_last
       elif flag == "none":
-        return h3
+        return h_last
       elif flag == "tanh":
-        return tf.nn.tanh(h3)
+        return tf.nn.tanh(h_last)
       else:
         sys.exit("WRONG norm flag")
-      #return tf.nn.tanh(h3)
 
 
   def load_gaussian(self):
