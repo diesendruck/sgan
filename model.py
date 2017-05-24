@@ -29,7 +29,7 @@ class SGAN(object):
   def __init__(self, sess, input_dim=2, output_dim=2, batch_size=50,
           sample_num=50, z_dim=1, dataset_name="default", d_spec="8,4,2",
           g_spec="2,4,8", checkpoint_dir=None, sample_dir=None, log_dir=None,
-          expt_name=None):
+          expt=None):
     """
     Args:
       sess: TensorFlow session
@@ -48,7 +48,7 @@ class SGAN(object):
     self.checkpoint_dir = checkpoint_dir
     self.sample_dir = sample_dir
     self.log_dir = log_dir
-    self.expt_name = expt_name
+    self.expt = expt
 
     # batch normalization : deals with poor initialization helps gradient flow
     self.d_bn0 = batch_norm(name="discriminator_bn0")
@@ -89,9 +89,7 @@ class SGAN(object):
     self.G = self.generator(self.z)
     self.D, self.D_logits = self.discriminator(inputs)
 
-    self.sampler_unit = self.sampler(self.z, flag="unit")  # Samples that appear in /samples.
-    self.sampler_tanh = self.sampler(self.z, flag="tanh")
-    self.sampler_none = self.sampler(self.z, flag="none")
+    self.sampler = self.sampler(self.z)  # Samples that appear in /samples.
     self.d_grid = self.discriminator(self.grid, reuse=True)  # Eval d_loss on grid.
 
     self.D_, self.D_logits_ = self.discriminator(self.G, reuse=True)
@@ -115,20 +113,32 @@ class SGAN(object):
 
 
     # Compute D loss for heldout, in-sample, and generated inputs.
+    """
     self.d_loss_real_heldout = tf.reduce_mean(
       sigmoid_cross_entropy_with_logits(self.D_logits_heldout, tf.ones_like(self.D_heldout)))
     self.d_loss_real = tf.reduce_mean(
         sigmoid_cross_entropy_with_logits(self.D_logits, tf.ones_like(self.D)))
     self.d_loss_gen = tf.reduce_mean(
       sigmoid_cross_entropy_with_logits(self.D_logits_, tf.zeros_like(self.D_)))
+    """
+    self.d_loss_real_heldout = tf.losses.mean_squared_error(
+        self.D_heldout, tf.ones_like(self.D_heldout))
+    self.d_loss_real = tf.losses.mean_squared_error(
+        self.D, tf.ones_like(self.D))
+    self.d_loss_gen = tf.losses.mean_squared_error(
+        self.D_, tf.zeros_like(self.D_))
 
     # Then check heatmaps to see if high prob areas are over true data.
     self.d_loss = self.d_loss_real + self.d_loss_gen
     self.d_loss_heldout = self.d_loss_real_heldout + self.d_loss_gen
 
     # Compute G loss.
+    """
     self.g_loss = tf.reduce_mean(
       sigmoid_cross_entropy_with_logits(self.D_logits_, tf.ones_like(self.D_)))
+    """
+    self.g_loss = tf.losses.mean_squared_error(
+      self.D_, tf.ones_like(self.D_))
 
     # Make scalar summaries of components of D losses.
     self.d_loss_real_heldout_sum = scalar_summary("d_loss_real_heldout", self.d_loss_real_heldout)
@@ -151,18 +161,26 @@ class SGAN(object):
   def train(self, config):
     """Train SGAN"""
     # Organize outputs according to experiment name.
-    self.sample_dir = "./samples/samples_"+self.expt_name
-    self.checkpoint_dir = "./checkpoints/checkpoints_"+self.expt_name
-    self.log_dir = "./logs/logs_"+self.expt_name
+    if config.expt != "test":
+      print "Changing config directory names based on expt."
+      config.sample_dir = "./samples/samples_"+self.expt
+      config.checkpoint_dir = "./checkpoints/checkpoints_"+self.expt
+      config.log_dir = "./logs/logs_"+self.expt
+      # Make dirs if they don't exist.
+      for dest_dir in [config.sample_dir, config.checkpoint_dir,
+          config.log_dir]:
+        if not os.path.exists(dest_dir):
+          os.makedirs(dest_dir)
+          print "Made dir: {}".format(dest_dir)
 
-    if config.dataset == "Gaussian":
+    if config.dataset == "gaussian":
       data = self.load_gaussian()
-    elif config.dataset == "ConcentricCircles":
+    elif config.dataset == "concentriccircles":
       data = self.load_concentric_circles()
-    elif config.dataset == "SwissRoll":
+    elif config.dataset == "swissroll":
       pass
     else:
-      raise ValueError("Choose dataset in ['Gaussian', 'ConcentricCircles'].")
+      raise ValueError("Choose dataset in ['gaussian', 'concentriccircles'].")
 
 
     # Split full data into training and heldout sets.
@@ -170,10 +188,19 @@ class SGAN(object):
     training = np.asarray(data[self.sample_num:])
     in_sample = np.asarray(training[:self.sample_num])
 
-    d_optim = tf.train.AdamOptimizer(config.d_learning_rate, beta1=config.beta1) \
-              .minimize(self.d_loss, var_list=self.d_vars)
-    g_optim = tf.train.AdamOptimizer(config.g_learning_rate, beta1=config.beta1) \
-              .minimize(self.g_loss, var_list=self.g_vars)
+    if config.optim == "adam":
+      d_optim = tf.train.AdamOptimizer(config.d_learning_rate, beta1=config.beta1) \
+                .minimize(self.d_loss, var_list=self.d_vars)
+      g_optim = tf.train.AdamOptimizer(config.g_learning_rate, beta1=config.beta1) \
+                .minimize(self.g_loss, var_list=self.g_vars)
+    elif config.optim == "adagrad":
+      d_optim = tf.train.AdagradOptimizer(config.d_learning_rate) \
+                .minimize(self.d_loss, var_list=self.d_vars)
+      g_optim = tf.train.AdagradOptimizer(config.g_learning_rate) \
+                .minimize(self.g_loss, var_list=self.g_vars)
+    else:
+      raise ValueError("Chose {}. --opt must be 'adam' or 'adagrad'".format(config.optim))
+
     try:
       tf.global_variables_initializer().run()
     except:
@@ -186,10 +213,10 @@ class SGAN(object):
         self.d_loss_gen_sum, self.g_loss_sum])
     self.d_sum = merge_summary([self.z_sum, self.d_sum, self.d_loss_real_sum,
         self.d_loss_sum, self.d_loss_real_heldout_sum, self.d_loss_heldout_sum])
-    self.writer = SummaryWriter(self.log_dir, self.sess.graph)
+    self.writer = SummaryWriter(config.log_dir, self.sess.graph)
 
     # Generate z.
-    if config.z_distr== "Uniform":
+    if config.z_distr== "uniform":
       sample_z = np.random.uniform(-1, 1, size=(self.sample_num , self.z_dim))
     else:
       sample_z = np.random.normal(0, 1, size=(self.sample_num, self.z_dim))
@@ -197,26 +224,27 @@ class SGAN(object):
 
     # Generate grid for evaluating discriminator loss.
     nx, ny = (20, 20)
-    x_grid = np.linspace(-1, 1, nx)
-    y_grid = np.linspace(-1, 1, ny)
+    x_grid = np.linspace(-5, 5, nx)
+    y_grid = np.linspace(-5, 5, ny)
     grid = np.asarray([[i, j] for i in x_grid for j in y_grid]) 
 
     counter = 1
     start_time = time.time()
-    could_load, checkpoint_counter = self.load(self.checkpoint_dir)
+    could_load, checkpoint_counter = self.load(config.checkpoint_dir)
     if could_load:
       counter = checkpoint_counter
       print(" [*] Load SUCCESS")
     else:
       print(" [!] Load failed...")
 
-    for epoch in xrange(config.epoch):
+    for epoch in xrange(config.epochs):
+      # Run training over many batches.
       batch_idxs = min(len(training), config.train_size) // config.batch_size
-
       for idx in xrange(batch_idxs):
         batch_inputs = training[idx*config.batch_size:(idx+1)*config.batch_size]
 
-        if config.z_distr== "Uniform":
+        # Choose distribution of z input.
+        if config.z_distr== "uniform":
           batch_z = np.random.uniform(-1, 1, [config.batch_size, self.z_dim]) \
                 .astype(np.float32)
         else:
@@ -243,18 +271,17 @@ class SGAN(object):
         errG = self.g_loss.eval({self.z: batch_z})
 
         counter += 1
-        print("Epoch: [%2d] [%4d/%4d] time: %.1f, d_loss(gen, insample, heldout): (%.2f, %.2f, %.2f), g_loss: %.2f" \
-          % (epoch, idx, batch_idxs, time.time() - start_time, errD_gen,
-             errD_real, errD_real_heldout, errG))
 
-        # Make plots from certain epochs.
-        if np.mod(epoch, 1) == 0 and idx == 0:
+        # Make plots from certain epoch-batch combinations.
+        if np.mod(epoch, config.epochs/10) == 0 and idx == 0:
+          print("Epoch: [%2d] [%4d/%4d] time: %.1f, d_loss(gen, insample, heldout): (%.2f, %.2f, %.2f), g_loss: %.2f" \
+            % (epoch, idx, batch_idxs, time.time() - start_time, errD_gen,
+               errD_real, errD_real_heldout, errG))
+
           try:
             # Run sampler and losses.
-            # TODO: testing multiple samplers.
-            samples_unit, samples_tanh, samples_none, d_loss, g_loss = self.sess.run(
-              [self.sampler_unit, self.sampler_tanh, self.sampler_none,
-               self.d_loss, self.g_loss],
+            samples, d_loss, g_loss = self.sess.run(
+              [self.sampler, self.d_loss, self.g_loss],
               feed_dict={
                   self.z: sample_z,
                   self.inputs: in_sample,
@@ -270,25 +297,24 @@ class SGAN(object):
             )
 
             plot_and_save_heatmap(d_grid, nx, ny, x_grid, y_grid, batch_inputs,
-                samples_none, epoch, idx, tag=None)
+                samples, epoch, idx, config)
 
-          #print("[Sample] d_loss: %.8f, g_loss: %.8f" % (d_loss, g_loss)) 
+            #print("[Sample] d_loss: %.8f, g_loss: %.8f" % (d_loss, g_loss)) 
 
           except:
             print("one pic error!...")
 
-        # Save checkpoint for certain epochs.
-        if np.mod(epoch, 100) == 0:
-          self.save(self.checkpoint_dir, counter)
+      # Save checkpoint for certain epochs.
+      if np.mod(epoch, config.epochs/10) == 0:
+        self.save(config.checkpoint_dir, counter)
+
+      # Email results so far, for certain epochs.
+      if np.mod(epoch, config.epochs/4) == 0:
+        email_sgan_graphs(epoch, config)
 
     # Email results from all runs.
-    outputs = natural_sort(glob("./sgan*.png")) 
-    attachments = " "
-    for o in outputs:
-        attachments += " -a {}".format(o)
-    
-    os.system(('echo $PWD | mutt -s "sgan: {}" momod@utexas.edu {}').format(
-        get_config_summary(config), attachments))
+    email_sgan_graphs(epoch, config)
+
 
   def discriminator(self, candidates, reuse=False):
     with tf.variable_scope("discriminator") as scope:
@@ -310,10 +336,10 @@ class SGAN(object):
       for i, dim in enumerate(hidden_dims):
         bn = bn_objects[i]
         next_layer = bn(tf.layers.dense(inputs=current_layer, units=dim,
-            activation=tf.nn.relu))
+            activation=tf.nn.tanh))
         current_layer = next_layer
       h_last = self.d_bn_last(tf.layers.dense(inputs=current_layer, units=1,
-          activation=tf.nn.relu))
+          activation=tf.nn.tanh))
       return tf.nn.sigmoid(h_last), h_last
 
 
@@ -325,6 +351,7 @@ class SGAN(object):
       hidden_dims = [d.strip() for d in spec.split(",")]
       assert len(hidden_dims) > 0, "Spec for architecture not properly defined, e.g. '8,4,2'."
       assert all([d.isdigit() for d in hidden_dims]), "Dims split on ',' and must be ints. Incorrect g_spec: '{}'".format(spec)
+
       # Define batch norm objects.
       bn_objects = []
       for i, dim in enumerate(hidden_dims):
@@ -335,15 +362,15 @@ class SGAN(object):
       for i, dim in enumerate(hidden_dims):
         bn = bn_objects[i]
         next_layer = bn(tf.layers.dense(inputs=current_layer, units=dim,
-            activation=tf.nn.relu))
+            activation=tf.nn.elu))
         current_layer = next_layer
       h_last = self.g_bn_last(tf.layers.dense(inputs=current_layer, units=2,
-          activation=tf.nn.relu))
+          activation=lambda x: x))
       return h_last
 
 
   # TODO: Test output of generator, to see if it needs normalizing.
-  def sampler(self, z, flag):
+  def sampler(self, z):
     with tf.variable_scope("generator") as scope:
       scope.reuse_variables()
 
@@ -362,26 +389,17 @@ class SGAN(object):
       for i, dim in enumerate(hidden_dims):
         bn = bn_objects[i]
         next_layer = bn(tf.layers.dense(inputs=current_layer, units=dim,
-            activation=tf.nn.relu), train=False)
+            activation=tf.nn.elu), train=False)
         current_layer = next_layer
       h_last = self.g_bn_last(tf.layers.dense(inputs=current_layer, units=2,
-          activation=tf.nn.relu))
-
-      if flag == "unit":
-        h_last = tf.contrib.layers.unit_norm(inputs=h_last, dim=0)
-        return h_last
-      elif flag == "none":
-        return h_last
-      elif flag == "tanh":
-        return tf.nn.tanh(h_last)
-      else:
-        sys.exit("WRONG norm flag")
+          activation=lambda x: x))
+      return h_last
 
 
   def load_gaussian(self):
     """Sample from a Gaussian."""
-    n = 500
-    center = [0.3, 0.3]
+    n = 300
+    center = [1., 1.]
     variance = 0.01
 
     points = np.random.multivariate_normal(center,
@@ -437,7 +455,6 @@ class SGAN(object):
     import re
     print(" [*] Reading checkpoints...")
     checkpoint_dir = os.path.join(checkpoint_dir, self.model_dir)
-
     ckpt = tf.train.get_checkpoint_state(checkpoint_dir)
     if ckpt and ckpt.model_checkpoint_path:
       ckpt_name = os.path.basename(ckpt.model_checkpoint_path)

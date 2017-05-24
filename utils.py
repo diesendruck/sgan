@@ -14,6 +14,7 @@ import pprint
 import random
 import re
 import scipy.misc
+from glob import glob
 from six.moves import xrange
 from time import gmtime, strftime
 
@@ -259,18 +260,19 @@ def natural_sort(l):
 
 def get_config_summary(config):
   summary_items = [
+    ["expt", config.expt],
     ["dataset", config.dataset],
+    ["optim", config.optim],
+    ["epochs", config.epochs],
     ["d_learning_rate", config.d_learning_rate],
     ["g_learning_rate", config.g_learning_rate],
     ["d_per_iter", config.d_per_iter],
     ["g_per_iter", config.g_per_iter],
     ["d_spec", config.d_spec],
     ["g_spec", config.g_spec],
-    ["epoch", config.epoch],
-    ["batch_size", config.batch_size],
     ["z_dim", config.z_dim],
     ["z_distr", config.z_distr],
-    ["expt_name", config.expt_name],
+    ["batch_size", config.batch_size],
   ]
   summary_string = ""
   for item in summary_items:
@@ -279,11 +281,11 @@ def get_config_summary(config):
 
 
 def plot_and_save_heatmap(d_grid, nx, ny, x_grid, y_grid, training, samples,
-    epoch, idx, tag):
+    epoch, idx, config):
   # Plot heatmap of discriminator on grid.
   fig, ax = plt.subplots()
   d_grid = np.reshape(d_grid[0][0], [nx, ny])
-  im = ax.pcolormesh(x_grid, y_grid, d_grid)
+  im = ax.pcolormesh(x_grid, y_grid, d_grid, vmin=0, vmax=1)
   fig.colorbar(im)
 
   # Plot generated samples against true training data.
@@ -292,10 +294,28 @@ def plot_and_save_heatmap(d_grid, nx, ny, x_grid, y_grid, training, samples,
   ax.scatter([x[0] for x in samples], [x[1] for x in samples],
           c="r", alpha=0.3)
   ax.set_title("Epoch {}, Idx {}".format(epoch, idx))
-  ax.set_xlim([-1,1])
-  ax.set_ylim([-1,1])
-  if tag:
-    fig.savefig("sgan_ep_{}_id_{}_{}.png".format(epoch, idx, tag))
-  else:
-    fig.savefig("sgan_ep_{}_id_{}.png".format(epoch, idx))
+  ax.set_xlim([np.min(x_grid), np.max(x_grid)])
+  ax.set_ylim([np.min(y_grid), np.max(y_grid)])
+  fig.savefig("{}/sgan_ep_{}_id_{}.png".format(config.sample_dir, epoch, idx))
   plt.close(fig)
+  return fig
+
+
+def email_sgan_graphs(epoch, config):
+  if config.email == None:
+    print "Tried to email, but --email=None, so no email sent."
+  else:
+    try:
+      outputs = natural_sort(glob("{}/sgan*.png".format(config.sample_dir)))
+      attachments = " "
+      for o in outputs:
+        attachments += " -a {}".format(o)
+      
+      os.system(
+        'echo $PWD | mutt -s "(sgan epoch {}): {}" {} {}'.format(
+          epoch, get_config_summary(config), config.email, attachments)) 
+    except:
+      print ("\nUnable to email. Maybe the email client 'mutt' is not installed."
+             " Results also stored to ./samples/samples_{EXPT NAME}. Experiment"
+             " name is either 'test', by default, or whatever was used with"
+             " the --expt flag.")
