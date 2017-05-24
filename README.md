@@ -1,6 +1,6 @@
 # SimpleGAN in Tensorflow
 
-Tensorflow implementation of a simple, expository, 2-D example of [Generative Adversarial Networks](https://arxiv.org/pdf/1406.2661.pdf).
+TensorFlow implementation of a simple, expository, 2-D example of [Generative Adversarial Networks](https://arxiv.org/pdf/1406.2661.pdf).
 
 ## Prerequisites
 
