@@ -7,6 +7,7 @@ Tensorflow implementation of a simple, expository, 2-D example of [Generative Ad
 - Python 2.7 or Python 3.3+
 - [Tensorflow 0.12.1](https://github.com/tensorflow/tensorflow/tree/r0.12)
 - [SciPy](http://www.scipy.org/install.html)
+- (optional) [Mutt email client](https://unix.stackexchange.com/questions/226936/how-to-install-setup-mutt-with-gmail-on-centos-and-ubuntu)
 
 ## Usage
 
