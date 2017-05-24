@@ -43,6 +43,9 @@ To start a new run from scratch (not picking up from pre-saved checkpoints), cle
 
 ## Results
 
+Sample gif of training steps under the following conditions:
+    $ --epochs=7500 --dataset="gaussian" --optim="adam" --d_per_iter=4 --g_per_iter=4 --d_spec="5,5,5,5,5,5,5" --g_spec="5,5,5" --z_dim=3 --z_distr="gaussian"
+
 ![result](assets/training.gif)
 
 ## Author
